@@ -1,7 +1,12 @@
 // Copyright 2026 The go-sasl-gssapi Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package gsstoken
+// Package seclayer marshals and unmarshals the RFC 4752 §3.3 security-layer
+// negotiation tokens — the acceptor's offer and the client's selection. These
+// are the SASL-GSSAPI-specific bodies carried inside the GSS Wrap tokens; the
+// GSS layer itself (AP-REQ/AP-REP, the RFC 4121 checksum, Wrap/Unwrap) lives in
+// github.com/hstern/krb5.
+package seclayer
 
 import "fmt"
 
@@ -43,7 +48,7 @@ type SecurityLayerOffer struct {
 // little-endian checksum integers.
 func ParseSecurityLayerOffer(b []byte) (SecurityLayerOffer, error) {
 	if len(b) != secLayerLen {
-		return SecurityLayerOffer{}, fmt.Errorf("gsstoken: security-layer offer is %d bytes, want %d", len(b), secLayerLen)
+		return SecurityLayerOffer{}, fmt.Errorf("seclayer: security-layer offer is %d bytes, want %d", len(b), secLayerLen)
 	}
 	return SecurityLayerOffer{
 		Layers:    SecurityLayer(b[0]),
@@ -72,10 +77,10 @@ type ClientReply struct {
 // big-endian max-buffer, then the raw authzid bytes.
 func (r ClientReply) Marshal() ([]byte, error) {
 	if r.MaxBuffer > maxBuffer24 {
-		return nil, fmt.Errorf("gsstoken: max-buffer %d exceeds 24-bit field", r.MaxBuffer)
+		return nil, fmt.Errorf("seclayer: max-buffer %d exceeds 24-bit field", r.MaxBuffer)
 	}
 	if r.Selected == LayerNone && r.MaxBuffer != 0 {
-		return nil, fmt.Errorf("gsstoken: no-security-layer reply must advertise a zero max-buffer")
+		return nil, fmt.Errorf("seclayer: no-security-layer reply must advertise a zero max-buffer")
 	}
 	out := make([]byte, secLayerLen+len(r.AuthzID))
 	out[0] = byte(r.Selected)

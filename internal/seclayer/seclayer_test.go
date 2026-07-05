@@ -1,7 +1,7 @@
 // Copyright 2026 The go-sasl-gssapi Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package gsstoken
+package seclayer
 
 import (
 	"bytes"
