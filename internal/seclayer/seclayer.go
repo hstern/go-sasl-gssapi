@@ -56,6 +56,20 @@ func ParseSecurityLayerOffer(b []byte) (SecurityLayerOffer, error) {
 	}, nil
 }
 
+// Marshal encodes the acceptor's 4-byte offer: the supported-layers bit-mask
+// then the 3-byte big-endian max-buffer.
+func (o SecurityLayerOffer) Marshal() ([]byte, error) {
+	if o.MaxBuffer > maxBuffer24 {
+		return nil, fmt.Errorf("seclayer: max-buffer %d exceeds 24-bit field", o.MaxBuffer)
+	}
+	return []byte{
+		byte(o.Layers),
+		byte(o.MaxBuffer >> 16),
+		byte(o.MaxBuffer >> 8),
+		byte(o.MaxBuffer),
+	}, nil
+}
+
 // ClientReply is the client's security-layer response (RFC 4752 §3.3), the
 // payload that gets GSS_Wrap-ped as the final client message: the single
 // selected layer, the client's own max-buffer, and the optional authorization
@@ -89,4 +103,19 @@ func (r ClientReply) Marshal() ([]byte, error) {
 	out[3] = byte(r.MaxBuffer)
 	copy(out[secLayerLen:], r.AuthzID)
 	return out, nil
+}
+
+// ParseClientReply decodes the client's unwrapped security-layer reply: the
+// selected-layer byte, the 3-byte big-endian max-buffer, then the authzid
+// (UTF-8, no NUL terminator). An empty authzid means the ticket's client
+// principal.
+func ParseClientReply(b []byte) (ClientReply, error) {
+	if len(b) < secLayerLen {
+		return ClientReply{}, fmt.Errorf("seclayer: client reply is %d bytes, want at least %d", len(b), secLayerLen)
+	}
+	return ClientReply{
+		Selected:  SecurityLayer(b[0]),
+		MaxBuffer: uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3]),
+		AuthzID:   string(b[secLayerLen:]),
+	}, nil
 }
