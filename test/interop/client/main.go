@@ -67,7 +67,7 @@ func run() error {
 
 	_, ir, err := client.Start()
 	if err != nil {
-		return fmt.Errorf("Start: %w", err)
+		return fmt.Errorf("client start: %w", err)
 	}
 	if err := emit(ir); err != nil {
 		return err
@@ -85,7 +85,7 @@ func run() error {
 		}
 		resp, err := client.Next(challenge)
 		if err != nil {
-			return fmt.Errorf("Next: %w", err)
+			return fmt.Errorf("client next: %w", err)
 		}
 		if err := emit(resp); err != nil {
 			return err
