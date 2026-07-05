@@ -1,0 +1,17 @@
+name: interop
+# Opt-in cross-implementation interop against MIT krb5. Not a required check —
+# it stands up a KDC in Docker and is slower than the unit suite. Run it
+# manually from the Actions tab (or before a release).
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the interop harness
+        run: |
+          docker build -f test/interop/Dockerfile -t saslgssapi-interop .
+          docker run --rm saslgssapi-interop

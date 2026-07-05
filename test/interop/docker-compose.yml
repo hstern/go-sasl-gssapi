@@ -1,0 +1,12 @@
+# Interop harness: build the image and run the go-sasl-gssapi client through a
+# full RFC 4752 handshake against MIT krb5. Usage (from the repo root):
+#
+#   docker compose -f test/interop/docker-compose.yml up --build \
+#     --exit-code-from interop --abort-on-container-exit
+#
+# Exits non-zero if MIT krb5 rejects any step of the handshake.
+services:
+  interop:
+    build:
+      context: ../..
+      dockerfile: test/interop/Dockerfile
