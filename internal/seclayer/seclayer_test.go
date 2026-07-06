@@ -80,3 +80,48 @@ func TestClientReplyMarshalErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestSecurityLayerOfferMarshalVector(t *testing.T) {
+	// Inverse of TestParseSecurityLayerOffer's {0x07, 0x00, 0x04, 0x00} vector.
+	got, err := SecurityLayerOffer{
+		Layers:    LayerNone | LayerIntegrity | LayerConfidentiality,
+		MaxBuffer: 1024,
+	}.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	want := []byte{0x07, 0x00, 0x04, 0x00}
+	if !bytes.Equal(got, want) {
+		t.Errorf("Marshal = %x, want %x", got, want)
+	}
+}
+
+func TestSecurityLayerOfferMarshalOverflow(t *testing.T) {
+	if _, err := (SecurityLayerOffer{MaxBuffer: 1 << 24}).Marshal(); err == nil {
+		t.Error("Marshal with 24-bit-overflowing MaxBuffer: want error, got nil")
+	}
+}
+
+func TestParseClientReply(t *testing.T) {
+	r, err := ParseClientReply([]byte{0x01, 0x00, 0x00, 0x00, 'u', 's', 'e', 'r'})
+	if err != nil {
+		t.Fatalf("ParseClientReply: %v", err)
+	}
+	if r.Selected != LayerNone {
+		t.Errorf("Selected = %#x, want LayerNone", byte(r.Selected))
+	}
+	if r.MaxBuffer != 0 {
+		t.Errorf("MaxBuffer = %d, want 0", r.MaxBuffer)
+	}
+	if r.AuthzID != "user" {
+		t.Errorf("AuthzID = %q, want %q", r.AuthzID, "user")
+	}
+}
+
+func TestParseClientReplyTooShort(t *testing.T) {
+	for _, b := range [][]byte{nil, {0x01}, {0x01, 0x00, 0x00}} {
+		if _, err := ParseClientReply(b); err == nil {
+			t.Errorf("ParseClientReply(%x): want error, got nil", b)
+		}
+	}
+}
