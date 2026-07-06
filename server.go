@@ -20,6 +20,12 @@ type ServerConfig struct {
 	// Keytab holds the service's long-term key(s); the acceptor decrypts the
 	// client's AP-REQ ticket with it. Required.
 	Keytab *keytab.Keytab
+
+	// Layers is the set of security layers the server offers. Empty (the
+	// default) means NoSecurityLayer only. Offering IntegrityProtection lets a
+	// client select it (then Wrap/Unwrap protect application data); include
+	// NoSecurityLayer to keep no-layer clients working.
+	Layers []SecurityLayer
 }
 
 // Server is the RFC 4752 SASL GSSAPI acceptor (server). It implements
@@ -27,16 +33,21 @@ type ServerConfig struct {
 // Kerberos GSS context is handled by hstern/krb5's krb5context.Acceptor, and
 // this type adds the RFC 4752 SASL framing and the security-layer negotiation.
 //
-// v0 offers no security layer (authentication only) with mandatory mutual
-// authentication. A Server is single-use. After a successful exchange, Complete
-// reports true and ClientName / AuthzID return the authenticated identity.
+// It performs mandatory mutual authentication and negotiates a security layer
+// (no-security-layer by default, or integrity when both ends support it, in
+// which case Wrap/Unwrap protect application data). A Server is single-use.
+// After a successful exchange, Complete reports true and ClientName / AuthzID
+// return the authenticated identity.
 type Server struct {
 	acceptor *krb5context.Acceptor
 	secCtx   *gssapi.SecContext
+	offered  seclayer.SecurityLayer
 
 	step       int
 	clientName string
 	authzID    string
+	layer      SecurityLayer
+	peerMax    uint32
 	complete   bool
 }
 
@@ -48,7 +59,14 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.Keytab == nil {
 		return nil, errors.New("saslgssapi: ServerConfig.Keytab is required")
 	}
-	return &Server{acceptor: krb5context.NewAcceptor(cfg.Keytab)}, nil
+	layers := cfg.Layers
+	if len(layers) == 0 {
+		layers = []SecurityLayer{NoSecurityLayer}
+	}
+	return &Server{
+		acceptor: krb5context.NewAcceptor(cfg.Keytab),
+		offered:  offeredMask(layers),
+	}, nil
 }
 
 // Next advances the acceptor. It is called with the client's AP-REQ (returning
@@ -91,12 +109,16 @@ func (s *Server) acceptAPReq(response []byte) ([]byte, bool, error) {
 }
 
 // offerSecurityLayer consumes the client's empty post-AP-REP token and returns
-// the GSS-wrapped security-layer offer (v0 offers no security layer only).
+// the GSS-wrapped offer of the configured security layers.
 func (s *Server) offerSecurityLayer(response []byte) ([]byte, bool, error) {
 	if len(response) != 0 {
 		return nil, false, fmt.Errorf("saslgssapi: expected an empty token before the security-layer offer, got %d bytes", len(response))
 	}
-	payload, err := seclayer.SecurityLayerOffer{Layers: seclayer.LayerNone}.Marshal()
+	var maxBuf uint32
+	if s.offered&^seclayer.SecurityLayer(NoSecurityLayer) != 0 {
+		maxBuf = defaultMaxBuffer // the largest wrapped message we can receive
+	}
+	payload, err := seclayer.SecurityLayerOffer{Layers: s.offered, MaxBuffer: maxBuf}.Marshal()
 	if err != nil {
 		return nil, false, fmt.Errorf("saslgssapi: %w", err)
 	}
@@ -126,13 +148,34 @@ func (s *Server) finish(response []byte) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("saslgssapi: %w", err)
 	}
-	if reply.Selected != seclayer.LayerNone {
-		return nil, false, fmt.Errorf("saslgssapi: client selected unsupported security layer %#x", byte(reply.Selected))
+	// The client must select exactly one layer we offered.
+	if reply.Selected&s.offered == 0 || reply.Selected&(reply.Selected-1) != 0 {
+		return nil, false, fmt.Errorf("saslgssapi: client selected security layer %#x, not among the offered %#x", byte(reply.Selected), byte(s.offered))
 	}
+	s.layer = SecurityLayer(reply.Selected)
+	s.peerMax = reply.MaxBuffer
 	s.authzID = reply.AuthzID
 	s.complete = true
 	s.step = 3
 	return nil, true, nil
+}
+
+// SecurityLayer returns the security layer negotiated during the handshake.
+// Meaningful only after Complete reports true.
+func (s *Server) SecurityLayer() SecurityLayer { return s.layer }
+
+// Wrap protects an application message under the negotiated security layer,
+// returning the token to send to the client. It errors when no security layer
+// was negotiated.
+func (s *Server) Wrap(p []byte) ([]byte, error) {
+	return wrapMessage(s.secCtx, s.layer, s.peerMax, p)
+}
+
+// Unwrap reverses Wrap for a token received from the client. The returned slice
+// shares storage with b; copy it before reusing or mutating b if you need to
+// retain the plaintext.
+func (s *Server) Unwrap(b []byte) ([]byte, error) {
+	return unwrapMessage(s.secCtx, s.layer, false, b)
 }
 
 // ClientName returns the authenticated client principal (e.g. "alice@REALM").
